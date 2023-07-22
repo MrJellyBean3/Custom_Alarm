@@ -1,18 +1,28 @@
 import serial	#alarm dependencies 
+import serial.tools.list_ports
 import time
 import datetime
 import sys
 import os
 import pygame
-import os 
 import keyboard
 
 turn_off_noise=False
 
 
 def main():
+    #print out all available ports for arduinos
+    ports = serial.tools.list_ports.comports()
+    arduino_port=""
+    for port in ports:
+        if (port.vid==9025 and port.pid==67):
+                print(port.description, " is an arduino")
+                arduino_port=port.device
+        else:
+            print(port.description)
     try:
-        ser=serial.Serial('COM3',9600,timeout=0.1)#,parity=serial.PARITY_EVEN, rtscts=1)
+        ser=serial.Serial(arduino_port,9600,timeout=0.1)#,parity=serial.PARITY_EVEN, rtscts=1)
+        print("connected to: ", ser.portstr)
     except Exception as ec:
         print(ec)
 
@@ -189,8 +199,8 @@ def main():
 
 
         #Alarm Function
-        alarm_active=alarm_f(alarm_duration,selected_alarm_name,button_bool,alarm_start_bool,last_alarm_time)
-
+        alarm_active=alarm_f(alarm_duration,selected_alarm_name,button_bool,alarm_cancel,alarm_start_bool,last_alarm_time)
+        turn_off_noise=False
 
 
         #Update Variables
@@ -207,7 +217,7 @@ def main():
 
     
 
-def alarm_f(set_time, alarm_name, stop_bit, alarm_start_bool, last_alarm_time):
+def alarm_f(set_time, alarm_name, stop_bit, alarm_cancel,alarm_start_bool, last_alarm_time):
     global turn_off_noise
     if alarm_start_bool:#Start Alarm
         pygame.mixer.music.load(alarm_name)
@@ -217,8 +227,11 @@ def alarm_f(set_time, alarm_name, stop_bit, alarm_start_bool, last_alarm_time):
         pygame.mixer.music.stop()
         return 0
     elif stop_bit:
-        pygame.mixer.music.stop()
-        return 0
+        if not alarm_cancel:
+            pygame.mixer.music.stop()
+            return 0
+        else:
+            return 1
     elif turn_off_noise:
         pygame.mixer.music.stop()
         turn_off_noise=False
