@@ -8,6 +8,7 @@ import pygame
 import keyboard
 
 turn_off_noise=False
+cancel_button=False
 
 
 def main():
@@ -20,6 +21,7 @@ def main():
                 arduino_port=port.device
         else:
             print(port.description)
+    arduino_port="COM3"
     try:
         ser=serial.Serial(arduino_port,9600,timeout=0.1)#,parity=serial.PARITY_EVEN, rtscts=1)
         print("connected to: ", ser.portstr)
@@ -84,16 +86,17 @@ def main():
     global turn_off_noise
     turn_off_noise=False
     print_time=0
+    global cancel_button
     while True:
         #update time and reset at midnight
         time.sleep(0.5)
         t_s=datetime.datetime.now()
         current_time_float=t_s.hour+t_s.minute/60
-        if t_s.day!=previous_day:
-            alarm_cancel=False
-            turn_off_noise=False
-            alarms_count=0
-            selected_alarm_name=alarm_names[1]
+        # if t_s.day!=previous_day:
+        #     alarm_cancel=False
+        #     turn_off_noise=False
+        #     alarms_count=0
+        #     selected_alarm_name=alarm_names[1]
         
         
 
@@ -108,6 +111,7 @@ def main():
             ser.flushInput()
         except Exception as e:
             print(e)
+            arduino_num=12
         motion_bool=1-arduino_num%2
         button_bool=int(arduino_num/10)-1
 
@@ -138,6 +142,9 @@ def main():
         if keyboard.is_pressed("m"):
             motion_count+=1
             print(motion_count)
+        if keyboard.is_pressed("b"):
+            button_bool=1
+            print("button pressed")
 
         
         
@@ -192,9 +199,13 @@ def main():
         elif alarms_count==3:
             snooze_duration=120
             alarm_cancel=True
+            cancel_button=True
             selected_alarm_name=alarm_names[1]
         elif alarms_count==7:
             selected_alarm_name=alarm_names[1]
+
+        if alarms_count>=3:
+            alarm_cancel=True
 
 
 
@@ -219,6 +230,7 @@ def main():
 
 def alarm_f(set_time, alarm_name, stop_bit, alarm_cancel,alarm_start_bool, last_alarm_time):
     global turn_off_noise
+    global cancel_button
     if alarm_start_bool:#Start Alarm
         pygame.mixer.music.load(alarm_name)
         pygame.mixer.music.play(-1)
@@ -226,8 +238,8 @@ def alarm_f(set_time, alarm_name, stop_bit, alarm_cancel,alarm_start_bool, last_
     if (last_alarm_time<(time.time()-set_time)):#Stop or Continue Alarm
         pygame.mixer.music.stop()
         return 0
-    elif stop_bit:
-        if not alarm_cancel:
+    elif not alarm_cancel:
+        if stop_bit and not cancel_button:
             pygame.mixer.music.stop()
             return 0
         else:
