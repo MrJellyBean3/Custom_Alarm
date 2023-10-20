@@ -5,6 +5,8 @@ import datetime
 import pygame
 import keyboard
 
+import os
+os.chdir(os.path.dirname(os.path.realpath(__file__)))
 
 def stop_sound():
     print("stoping sound")
