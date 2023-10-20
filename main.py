@@ -18,8 +18,8 @@ class Alarm:
 
     #setting alarm
     prev_day=datetime.datetime.now().day
-    set_hour=19
-    set_minute=0
+    set_hour=9
+    set_minute=10
     set_time_float=set_hour+set_minute/60
     first_set_time_float=set_time_float
     prev_alarm_time=first_set_time_float
