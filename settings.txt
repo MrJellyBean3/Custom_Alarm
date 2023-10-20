@@ -1,0 +1,3 @@
+testing bool =True if >1  val:1
+current time hour float   val:20.1
+speed inc how many hours /second val:0.01

@@ -2,17 +2,202 @@ import serial	#alarm dependencies
 import serial.tools.list_ports
 import time
 import datetime
-import sys
-import os
 import pygame
 import keyboard
 
-turn_off_noise=False
-cancel_button=False
+
+def stop_sound():
+    print("stoping sound")
+    pygame.mixer.music.stop()
+
+
+class Alarm:
+    #testing settings
+    testing_bool=False
+    time_inc=0.1
+
+    #setting alarm
+    prev_day=datetime.datetime.now().day
+    set_hour=19
+    set_minute=0
+    set_time_float=set_hour+set_minute/60
+    first_set_time_float=set_time_float
+    prev_alarm_time=first_set_time_float
+
+    alarm_names=["calm_alarm.mp3","jungle_sounds.mp3","insane_alarm.mp3"]
+    alarm_name=alarm_names[1]
+    sound_duration=0.02
+    time_since_update=1
+    time_tracker=time.time()
+    prev_time_float=0
+    current_time_float=0
+    
+    #snooze settings
+    snooze_duration=0.15
+    snooze_count=0
+    snooze_enabled=True
+    alarm_count=0
+
+
+
+    #arduino data
+    button_bool=False
+    button_bool_prev=False
+    motion_bool=False
+    motion_bool_prev=False
+    #motion settings
+    motion_count_prev=0
+    current_motion_count=0
+    active_motion_bool=False
+    motions_before_active=2
+    motion_based_soft_wakeup_duration=0.25
+
+
+    #alarm settings and states
+    in_zone=False
+    in_zone_prev=True
+    zone_duration_float=1
+
+    sound_active=False
+
+    stop_key=False
+
+    start_alarm=False
+    start_alarm_prev=False
+
+
+
+    #motion sentry
+    motion_sentry_mode=False
+    motion_sentry_pauseduration=0.02
+
+
+    def update(self):
+        #update time
+        t_s=datetime.datetime.now()
+        self.time_since_update=time.time()-self.time_tracker
+        self.time_tracker=time.time()
+        #check if testing bool is active
+        if self.testing_bool>0:
+            self.current_time_float+=self.time_inc*self.time_since_update
+            if not self.in_zone:
+                self.time_inc=0.5
+            else:
+                self.time_inc=0.01
+        else:
+            self.current_time_float=t_s.hour+t_s.minute/60
+        #reset alarm if it is the next day
+        if (t_s.day!=self.prev_day) or (self.testing_bool and (self.current_time_float>24)):
+            if self.testing_bool:
+                self.current_time_float=0
+            self.alarm_count=0
+            self.snooze_count=0
+            self.alarm_name=self.alarm_names[1]
+            self.motion_sentry_mode=False
+            self.current_motion_count=0
+            self.motion_count_prev=0
+            self.snooze_duration=0.15
+            self.set_time_float=self.first_set_time_float
+        self.prev_time_float=self.current_time_float
+
+        #zone
+        self.in_zone=(self.current_time_float>=self.first_set_time_float) and (self.current_time_float<(self.first_set_time_float+self.zone_duration_float))
+
+
+        #motion upon zone
+        if (self.in_zone and not self.in_zone_prev):#calculate motion counts
+            self.motion_count_prev=self.current_motion_count
+        self.active_motion_bool=((self.motion_count_prev+self.motions_before_active)<self.current_motion_count)
+        
+
+        #Alarming logic
+        if self.in_zone:
+            if not self.motion_sentry_mode:
+                #activate first alarm
+                if (self.alarm_count==0):
+                    self.start_alarm=(self.active_motion_bool or (self.current_time_float>(self.first_set_time_float+self.motion_based_soft_wakeup_duration)))
+                else:
+                    self.start_alarm=self.current_time_float>self.set_time_float
+            #Sentry Mode
+            else:
+                #if it is time to turn on motion sentry
+                if ((self.prev_alarm_time+self.motion_sentry_pauseduration)<self.current_time_float):
+                    if self.active_motion_bool:
+                        self.start_alarm=True
+                else:
+                    self.motion_count_prev=self.current_motion_count
+
+        #Snoozer Scheduler
+        if self.start_alarm:
+            self.prev_alarm_time=self.current_time_float
+            self.alarm_count+=1
+
+            if self.alarm_count==2: 
+                self.snooze_duration=0.08
+            elif self.alarm_count==3:
+                self.snooze_duration=0.03
+            elif self.alarm_count==7:
+                self.alarm_name=self.alarm_names[1]
+
+            if self.alarm_count>3:
+                self.snooze_enabled=False
+            else:
+                self.snooze_enabled=True
+
+            self.set_time_float=self.current_time_float+self.snooze_duration
+        
+
+        ##Mixer update
+        #Start Alarm
+        if self.start_alarm:
+            pygame.mixer.music.load(self.alarm_name)
+            pygame.mixer.music.play(-1)
+            self.sound_active=True
+        
+        #Stop if outsize zone
+        if not self.in_zone:
+            if self.sound_active:
+                stop_sound()
+                self.sound_active=False
+
+        
+        #Stop if stop_key is pressed
+        if self.stop_key:
+            if self.sound_active:
+                stop_sound()
+                self.sound_active=False
+
+        #Stop if sound duration is exceeded
+        if ((self.prev_alarm_time+self.sound_duration)<self.current_time_float):
+            if self.sound_active:
+                print("duration exceeded")
+                stop_sound()
+                self.sound_active=False
+        
+        #If snooze is pressed
+        if (not self.motion_sentry_mode) and self.snooze_enabled and (self.button_bool and not self.button_bool_prev):
+            if self.sound_active:
+                stop_sound()
+                self.sound_active=False
+            self.snooze_count+=1
+        
+
+        print("start alarm: ",self.start_alarm, " time float: ", self.current_time_float, " alarm set point: ", self.set_time_float, " in zone: ",self.in_zone)
+
+        #variable updates
+        self.start_alarm=False
+        self.button_bool_prev=self.button_bool
+        self.motion_bool_prev=self.motion_bool
+        self.in_zone_prev=self.in_zone
+        self.start_alarm_prev=self.start_alarm
+        self.prev_day=t_s.day
+
+
+
 
 
 def main():
-    #print out all available ports for arduinos
+    #Connect to arduino
     ports = serial.tools.list_ports.comports()
     arduino_port=""
     for port in ports:
@@ -28,78 +213,34 @@ def main():
     except Exception as ec:
         print(ec)
 
-    alarm_names=["calm_alarm.mp3","jungle_sounds.mp3","insane_alarm.mp3"]
 
-    selected_alarm_name=alarm_names[1]
-
-    alarm_states=0
-    alarm_h=8
-    alarm_m=30
-
-    snooze_duration=600
-
-    alarm_wait_for_motion_minutes=15
-    alarm_motion_wait=15/60
-
-    alarm_duration=100
-    
-    alarm_time_float=alarm_h+alarm_m/60
-    
-
-    motion_bool=0
-    motion_bool_prev=motion_bool
-    motion_count=0
-    motion_since_last_alarm=0
-    counted_motion_bool=0
-    motion_count_upon_zone=0
-    arduino_num=0
-    button_bool=0
-    button_bool_prev=0
-    alarms_count=0
-
-
-    in_alarm_zone=0
-    in_alarm_zone_prev=in_alarm_zone
-    alarm_bool=0
-    alarm_bool_prev=alarm_bool
-
-    alarm_begin=0
-    alarm_begin_prev=alarm_begin
-    alarm_start_bool=0
-    
-
-
-    alarm_start_time=time.time()
-    last_alarm_time=alarm_start_time
-
-    t_s=datetime.datetime.now()
-    time_from_alarm=t_s.hour+t_s.minute/60-alarm_time_float
-    print(t_s.hour)
-
-
-    pygame.init()	#alarm function
+    #alarm sounds setup
+    pygame.init()
     pygame.mixer.init()
 
+    alarm=Alarm()
 
-    previous_day=t_s.day
-    alarm_cancel=False
-    global turn_off_noise
-    turn_off_noise=False
-    print_time=0
-    global cancel_button
+    #initialization of variables
+    arduino_num=0
+
+
+
+    #If testing get settings to test
+    with open("settings.txt","r") as sf:
+        alarm.testing_bool=int(sf.readline().split(":")[-1])
+        if alarm.testing_bool:
+            alarm.current_time_float=float(sf.readline().split(":")[-1])
+            print("ctf: ",alarm.current_time_float)
+            alarm.time_inc=float(sf.readline().split(":")[-1])
+            print("time inc: ",alarm.time_inc)
+            alarm.first_set_time_float=alarm.set_time_float
+            alarm.prev_alarm_time=alarm.first_set_time_float
+
+    #Start main loop
     while True:
-        #update time and reset at midnight
+        #sleep for half second
         time.sleep(0.5)
-        t_s=datetime.datetime.now()
-        current_time_float=t_s.hour+t_s.minute/60
-        # if t_s.day!=previous_day:
-        #     alarm_cancel=False
-        #     turn_off_noise=False
-        #     alarms_count=0
-        #     selected_alarm_name=alarm_names[1]
         
-        
-
         #gets arduino data
         try:
             data=ser.read(2048)
@@ -110,146 +251,39 @@ def main():
                     break
             ser.flushInput()
         except Exception as e:
-            print(e)
+            #print(e)
+            alarm.button_bool=False
             arduino_num=12
-        motion_bool=1-arduino_num%2
-        button_bool=int(arduino_num/10)-1
-
-        
-
-        #button snooze
-        if button_bool and not button_bool_prev:
-            pygame.mixer.music.stop()
-
-        
-
         #record motion
-        if (motion_bool and not motion_bool_prev):
-            motion_count+=1
+        if ((1-arduino_num%2) and not alarm.motion_bool_prev):
             print("MOTION")
             f_r=open("motion_record.txt","r+")
             f_r.seek(0,2)
             f_r.write(str("\n"+str(datetime.datetime.now())))
             f_r.close()
-        
+
+        #set alarm arduino data
+        alarm.motion_bool=1-arduino_num%2
+        alarm.button_bool=((int(arduino_num/10)-1)>0)
 
 
-        #check if spacebard is pressed
+        #check if spacebar is pressed to go to sentry motion mode
         if keyboard.is_pressed('space'):
-            print("Alarm Cancelled")
-            alarm_cancel=True
-            turn_off_noise=True
+            print("Alarm in motion sentry mode")
+            alarm.motion_sentry_mode=True
+            alarm.stop_key=True
+        else:
+            alarm.stop_key=False
         if keyboard.is_pressed("m"):
-            motion_count+=1
-            print(motion_count)
+            alarm.current_motion_count+=1
+            print("motion button")
         if keyboard.is_pressed("b"):
-            button_bool=1
+            alarm.button_bool=True
             print("button pressed")
 
-        
-        
-        if ((current_time_float>=alarm_time_float) and (current_time_float<(alarm_time_float+1))):#if in time zone
-            in_alarm_zone=1
-            if (in_alarm_zone and not in_alarm_zone_prev):#calculate motion counts
-                motion_count_upon_zone=motion_count
-            if ((motion_count_upon_zone<motion_count) or (current_time_float>=(alarm_time_float+alarm_motion_wait))):#if motion or time passed
-                alarm_begin=1
-                if alarm_begin and not alarm_begin_prev:#First Alarm
-                    alarm_start_time=time.time()
-                    last_alarm_time=alarm_start_time
-                    alarm_start_bool=1
-                elif ((time.time()-last_alarm_time)>snooze_duration):#If time has passed
-                    if not alarm_cancel:
-                        last_alarm_time=time.time()
-                        alarm_start_bool=1
-                    elif ((time.time()-last_alarm_time)>61) and (motion_since_last_alarm<motion_count):#if cancel alarm
-                        last_alarm_time=time.time()
-                        alarm_start_bool=1
-                    else:
-                        alarm_start_bool=0
-                else:
-                    alarm_start_bool=0
-            else:
-                alarm_begin=0
-        else:
-            in_alarm_zone=0
 
-
-
-        if ((time.time()-last_alarm_time)>60):#Check for motion 1 minute after alarm goes off
-            if not counted_motion_bool:
-                motion_since_last_alarm=motion_count
-            counted_motion_bool=1
-        else:
-            counted_motion_bool=0
-
-
-
-        if ((time.time()-print_time)>2):#Prints
-            print("button: ",button_bool," Alarm_start: ",alarm_start_bool," Last alarm: ",last_alarm_time," Alarm zone: ",in_alarm_zone," alarm_begin: ",alarm_begin, " alarm cancel: ",alarm_cancel)
-            print_time=time.time()
-
-
-
-        if alarm_start_bool:#Snoozer Scheduler
-            alarms_count+=1
-        if alarms_count==2: 
-            snooze_duration=300
-            selected_alarm_name=alarm_names[1]
-        elif alarms_count==3:
-            snooze_duration=120
-            alarm_cancel=True
-            cancel_button=True
-            selected_alarm_name=alarm_names[1]
-        elif alarms_count==7:
-            selected_alarm_name=alarm_names[1]
-
-        if alarms_count>=3:
-            alarm_cancel=True
-
-
-
-        #Alarm Function
-        alarm_active=alarm_f(alarm_duration,selected_alarm_name,button_bool,alarm_cancel,alarm_start_bool,last_alarm_time)
-        turn_off_noise=False
-
-
-        #Update Variables
-        alarm_start_bool=0
-        button_bool_prev=button_bool
-        motion_bool_prev=motion_bool
-        in_alarm_zone_prev=in_alarm_zone
-        alarm_begin_prev=alarm_begin
-        previous_day=t_s.day
-
-
-
-
-
-    
-
-def alarm_f(set_time, alarm_name, stop_bit, alarm_cancel,alarm_start_bool, last_alarm_time):
-    global turn_off_noise
-    global cancel_button
-    if alarm_start_bool:#Start Alarm
-        pygame.mixer.music.load(alarm_name)
-        pygame.mixer.music.play(-1)
-
-    if (last_alarm_time<(time.time()-set_time)):#Stop or Continue Alarm
-        pygame.mixer.music.stop()
-        return 0
-    elif not alarm_cancel:
-        if stop_bit and not cancel_button:
-            pygame.mixer.music.stop()
-            return 0
-        else:
-            return 1
-    elif turn_off_noise:
-        pygame.mixer.music.stop()
-        turn_off_noise=False
-        return 0
-    else:
-        return 1
+        #update alarm
+        alarm.update()
 
 
 
